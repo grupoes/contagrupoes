@@ -171,6 +171,9 @@ class Maqueta_compra extends BaseController
                 $array_colores = [];
 
                 $error = 0;
+                $ruc_cache = [];
+                $batch_compras = [];
+                $seen_dup = [];
 
                 for ($i = 0; $i < $cantidad; $i++) {
 
@@ -184,73 +187,68 @@ class Maqueta_compra extends BaseController
 
                     $ruc_proveedor = trim($ruc_cliente[$i]);
 
-                    $consulta_repite = $this->si_se_repite_comprobante($serie_num, $ruc_proveedor, $fecha_registro);
-
-                    if (count($consulta_repite) == 0) {
+                    // Detección de duplicados en memoria (evita query SQL por fila)
+                    $dup_key = $serie_num . '|' . $ruc_proveedor;
+                    if (!isset($seen_dup[$dup_key])) {
                         $color = "";
+                        $seen_dup[$dup_key] = ['color' => '', 'indices' => []];
                     } else {
-
-                        $color = 'FF0000';
-
-                        if (in_array($color, $array_colores) == true) {
-
-                            $color_ = 999;
-
-                            while ($color_ <= 999) {
-                                $conteo = count($colores);
-                                $color_aleatorio = mt_rand(0, $conteo - 1);
-                                $color_aleatorio = $colores[$color_aleatorio];
-
-                                if (in_array($color_aleatorio, $array_colores) == true) {
-                                    $color_ = 999;
-                                } else {
-                                    $color_ = 1000;
+                        if ($seen_dup[$dup_key]['color'] === '') {
+                            $color = 'FF0000';
+                            if (in_array($color, $array_colores) == true) {
+                                $color_ = 999;
+                                while ($color_ <= 999) {
+                                    $conteo = count($colores);
+                                    $color_aleatorio = mt_rand(0, $conteo - 1);
+                                    $color_aleatorio = $colores[$color_aleatorio];
+                                    if (in_array($color_aleatorio, $array_colores) == true) {
+                                        $color_ = 999;
+                                    } else {
+                                        $color_ = 1000;
+                                    }
+                                    $color = $color_aleatorio;
                                 }
-
-                                $color = $color_aleatorio;
                             }
-
-                            foreach ($consulta_repite as $key => $value) {
-                                $data_update = array(
-                                    "color" => $color
-                                );
-
-                                $maqueta->update($value['id_maqueta'], $data_update);
+                            array_push($array_colores, $color);
+                            $seen_dup[$dup_key]['color'] = $color;
+                            // Actualizar color en los registros anteriores del batch
+                            foreach ($seen_dup[$dup_key]['indices'] as $prev_idx) {
+                                $batch_compras[$prev_idx]['color'] = $color;
                             }
                         } else {
-
-                            $color = $color;
-
-                            foreach ($consulta_repite as $key => $value) {
-                                $data_update = array(
-                                    "color" => $color
-                                );
-
-                                $maqueta->update($value['id_maqueta'], $data_update);
-                            }
+                            $color = $seen_dup[$dup_key]['color'];
                         }
-
-                        array_push($array_colores, $color);
                     }
+                    $seen_dup[$dup_key]['indices'][] = $i;
 
-                    $res = $this->existe_ruc_dni($ruc_proveedor, 1);
-
-                    if ($res == 0) {
-                        $data_cliente = $this->api_dni_ruc("ruc", $ruc_proveedor);
-
-                        if (isset($data_cliente['data'])) {
-                            $razon_social = $data_cliente['data']->razon_social;
-                            $condicion_con = $data_cliente['data']->condicion;
-                            $estado_con = $data_cliente['data']->estado;
-                        } else {
-                            $razon_social = "ERROR";
-                            $condicion_con = "ERROR";
-                            $estado_con = "ERROR";
-                        }
+                    // Caché en memoria: evita query + llamada API por cada fila con el mismo RUC
+                    if (isset($ruc_cache[$ruc_proveedor])) {
+                        $razon_social = $ruc_cache[$ruc_proveedor]['razon_social'];
+                        $condicion_con = $ruc_cache[$ruc_proveedor]['condicion'];
+                        $estado_con = $ruc_cache[$ruc_proveedor]['estado'];
                     } else {
-                        $razon_social = $res['razon_social'];
-                        $condicion_con = $res['condicion_contribuyente'];
-                        $estado_con = $res['estado_contribuyente'];
+                        $res = $this->existe_ruc_dni($ruc_proveedor, 1);
+                        if ($res == 0) {
+                            $data_cliente = $this->api_dni_ruc("ruc", $ruc_proveedor);
+                            if (isset($data_cliente['data'])) {
+                                $razon_social = $data_cliente['data']->razon_social;
+                                $condicion_con = $data_cliente['data']->condicion;
+                                $estado_con = $data_cliente['data']->estado;
+                            } else {
+                                $razon_social = "ERROR";
+                                $condicion_con = "ERROR";
+                                $estado_con = "ERROR";
+                            }
+                        } else {
+                            $razon_social = $res['razon_social'];
+                            $condicion_con = $res['condicion_contribuyente'];
+                            $estado_con = $res['estado_contribuyente'];
+                        }
+                        $ruc_cache[$ruc_proveedor] = [
+                            'razon_social' => $razon_social,
+                            'condicion' => $condicion_con,
+                            'estado' => $estado_con,
+                        ];
                     }
 
                     $insert = array(
@@ -280,7 +278,11 @@ class Maqueta_compra extends BaseController
                         "periodo" => $periodo
                     );
 
-                    $maqueta->insert($insert);
+                    $batch_compras[$i] = $insert;
+                }
+
+                if (!empty($batch_compras)) {
+                    $maqueta->insertBatch($batch_compras);
                 }
 
                 if ($error == 1) {
@@ -301,91 +303,58 @@ class Maqueta_compra extends BaseController
 
                 $spreadsheet = new Spreadsheet();
                 $sheet = $spreadsheet->getActiveSheet();
-
                 $sheet->setTitle("Maqueta de compras");
 
-                $styleTitle = [
-                    'font' => [
-                        'bold' => true,
-                        //'size' => 20
-                    ]
-                ];
-
-                $sheet->getStyle('A1')->applyFromArray($styleTitle);
-                $sheet->getStyle('B1')->applyFromArray($styleTitle);
-                $sheet->getStyle('C1')->applyFromArray($styleTitle);
-                $sheet->getStyle('D1')->applyFromArray($styleTitle);
-                $sheet->getStyle('E1')->applyFromArray($styleTitle);
-                $sheet->getStyle('F1')->applyFromArray($styleTitle);
-                $sheet->getStyle('G1')->applyFromArray($styleTitle);
-                $sheet->getStyle('H1')->applyFromArray($styleTitle);
-                $sheet->getStyle('I1')->applyFromArray($styleTitle);
-                $sheet->getStyle('J1')->applyFromArray($styleTitle);
-                $sheet->getStyle('K1')->applyFromArray($styleTitle);
-                $sheet->getStyle('L1')->applyFromArray($styleTitle);
-                $sheet->getStyle('M1')->applyFromArray($styleTitle);
-                $sheet->getStyle('N1')->applyFromArray($styleTitle);
-                $sheet->getStyle('O1')->applyFromArray($styleTitle);
-                $sheet->getStyle('P1')->applyFromArray($styleTitle);
-                $sheet->getStyle('Q1')->applyFromArray($styleTitle);
-                $sheet->getStyle('R1')->applyFromArray($styleTitle);
-                $sheet->getStyle('S1')->applyFromArray($styleTitle);
-                //$sheet->getStyle('T1')->applyFromArray($styleTitle);
+                $sheet->getStyle('A1:T1')->applyFromArray(['font' => ['bold' => true]]);
 
                 $encabezado = ["PERIODO", "FECHA", "TIPO_MONEDA", "DOCUMENTO", "#_DOCUMENTO", "CONDICION", "RUC", "RAZON_SOCIAL", "VVENTA", "VALOR_DE_VENTA", "IGV", "BOLSA", "ICB", "TOTAL", "TIPO_CAMBIO", "GLOSA", "CUENTA", "AFECTACION", 'CONDICION DEL CONTRIBUYENTE', 'ESTADO DEL CONTRIBUYENTE'];
-                # El último argumento es por defecto A1 pero lo pongo para que se explique mejor
                 $sheet->fromArray($encabezado, null, 'A1');
 
-                $color = \PhpOffice\PhpSpreadsheet\Style\Color::COLOR_RED;
+                // Forzar columna E como texto para preservar formato de serie-correlativo
+                $sheet->getStyle('E:E')->getNumberFormat()->setFormatCode('@');
+
+                $filas_compras = [];
+                $colored_rows_compras = [];
 
                 foreach ($query as $key => $value) {
-
-                    if ($value['color'] == "") {
-                        $sheet->setCellValueByColumnAndRow(1, $key + 2, date('d/m/Y', strtotime($periodo)));
-                        $sheet->setCellValueByColumnAndRow(2, $key + 2, date('d/m/Y', strtotime($value["fecha"])));
-                        $sheet->setCellValueByColumnAndRow(3, $key + 2, $value["tipo_moneda"]);
-                        $sheet->setCellValueByColumnAndRow(4, $key + 2, $value['documento']);
-                        //$sheet->setCellValueByColumnAndRow(5, $key + 2, $value['numero_documento']);
-                        $sheet->getCellByColumnAndRow(5, $key + 2)->setValueExplicit($value['numero_documento'], DataType::TYPE_STRING);
-                        $sheet->setCellValueByColumnAndRow(6, $key + 2, $value['condicion']);
-                        $sheet->setCellValueByColumnAndRow(7, $key + 2, $value['ruc']);
-                        $sheet->setCellValueByColumnAndRow(8, $key + 2, $value['razon_social']);
-                        $sheet->setCellValueByColumnAndRow(9, $key + 2, $value['vventa']);
-                        $sheet->setCellValueByColumnAndRow(10, $key + 2, $value['valor_venta']);
-                        $sheet->setCellValueByColumnAndRow(11, $key + 2, $value['igv']);
-                        $sheet->setCellValueByColumnAndRow(12, $key + 2, $value['bolsa']);
-                        $sheet->setCellValueByColumnAndRow(13, $key + 2, $value['icb']);
-                        $sheet->setCellValueByColumnAndRow(14, $key + 2, $value['total']);
-                        $sheet->setCellValueByColumnAndRow(15, $key + 2, $value['tipo_cambio']);
-                        $sheet->setCellValueByColumnAndRow(16, $key + 2, $value['glosa']);
-                        $sheet->setCellValueByColumnAndRow(17, $key + 2, $value['cuenta']);
-                        $sheet->setCellValueByColumnAndRow(18, $key + 2, $value['afectacion']);
-                        //$sheet->setCellValueByColumnAndRow(18, $key + 2, $value['estado']);
-                        $sheet->setCellValueByColumnAndRow(19, $key + 2, $value['condicion_contribuyente']);
-                        $sheet->setCellValueByColumnAndRow(20, $key + 2, $value['estado_contribuyente']);
-                    } else {
-                        $sheet->setCellValueByColumnAndRow(1, $key + 2, date('d/m/Y', strtotime($periodo)))->getStyle('A' . ($key + 2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
-                        $sheet->setCellValueByColumnAndRow(2, $key + 2, date('d/m/Y', strtotime($value["fecha"])))->getStyle('B' . ($key + 2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
-                        $sheet->setCellValueByColumnAndRow(3, $key + 2, $value["tipo_moneda"])->getStyle('C' . ($key + 2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
-                        $sheet->setCellValueByColumnAndRow(4, $key + 2, $value['documento'])->getStyle('D' . ($key + 2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
-                        $sheet->setCellValueByColumnAndRow(5, $key + 2, $value['numero_documento'])->getStyle('E' . ($key + 2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
-                        $sheet->setCellValueByColumnAndRow(6, $key + 2, $value['condicion'])->getStyle('F' . ($key + 2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
-                        $sheet->setCellValueByColumnAndRow(7, $key + 2, $value['ruc'])->getStyle('G' . ($key + 2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
-                        $sheet->setCellValueByColumnAndRow(8, $key + 2, $value['razon_social'])->getStyle('H' . ($key + 2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
-                        $sheet->setCellValueByColumnAndRow(9, $key + 2, $value['vventa'])->getStyle('I' . ($key + 2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
-                        $sheet->setCellValueByColumnAndRow(10, $key + 2, $value['valor_venta'])->getStyle('J' . ($key + 2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
-                        $sheet->setCellValueByColumnAndRow(11, $key + 2, $value['igv'])->getStyle('K' . ($key + 2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
-                        $sheet->setCellValueByColumnAndRow(12, $key + 2, $value['bolsa'])->getStyle('L' . ($key + 2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
-                        $sheet->setCellValueByColumnAndRow(13, $key + 2, $value['icb'])->getStyle('M' . ($key + 2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
-                        $sheet->setCellValueByColumnAndRow(14, $key + 2, $value['total'])->getStyle('N' . ($key + 2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
-                        $sheet->setCellValueByColumnAndRow(15, $key + 2, $value['tipo_cambio'])->getStyle('O' . ($key + 2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
-                        $sheet->setCellValueByColumnAndRow(16, $key + 2, $value['glosa'])->getStyle('P' . ($key + 2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
-                        $sheet->setCellValueByColumnAndRow(17, $key + 2, $value['cuenta'])->getStyle('Q' . ($key + 2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
-                        $sheet->setCellValueByColumnAndRow(18, $key + 2, $value['afectacion'])->getStyle('R' . ($key + 2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
-                        //$sheet->setCellValueByColumnAndRow(18, $key + 2, $value['estado'])->getStyle('R'.($key+2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
-                        $sheet->setCellValueByColumnAndRow(19, $key + 2, $value['condicion_contribuyente'])->getStyle('S' . ($key + 2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
-                        $sheet->setCellValueByColumnAndRow(20, $key + 2, $value['estado_contribuyente'])->getStyle('T' . ($key + 2))->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB($value['color']);
+                    $filas_compras[] = [
+                        date('d/m/Y', strtotime($periodo)),
+                        date('d/m/Y', strtotime($value["fecha"])),
+                        $value["tipo_moneda"],
+                        $value['documento'],
+                        $value['numero_documento'],
+                        $value['condicion'],
+                        $value['ruc'],
+                        $value['razon_social'],
+                        $value['vventa'],
+                        $value['valor_venta'],
+                        $value['igv'],
+                        $value['bolsa'],
+                        $value['icb'],
+                        $value['total'],
+                        $value['tipo_cambio'],
+                        $value['glosa'],
+                        $value['cuenta'],
+                        $value['afectacion'],
+                        $value['condicion_contribuyente'],
+                        $value['estado_contribuyente'],
+                    ];
+                    if ($value['color'] !== '') {
+                        $colored_rows_compras[$key + 2] = $value['color'];
                     }
+                }
+
+                if (!empty($filas_compras)) {
+                    $sheet->fromArray($filas_compras, null, 'A2');
+                }
+
+                // Aplicar color a fila completa (en vez de celda por celda)
+                foreach ($colored_rows_compras as $row_num => $color_val) {
+                    $sheet->getStyle("A{$row_num}:T{$row_num}")
+                          ->getFill()
+                          ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                          ->getStartColor()
+                          ->setARGB($color_val);
                 }
 
                 $file_compras = "MAQUETA_COMPRAS_" . $ruc . "_" . uniqid() . ".xlsx";
@@ -402,6 +371,7 @@ class Maqueta_compra extends BaseController
 
             if (isset($_POST['fecha_venta'])) {
                 $cantidad_venta = count($_POST['fecha_venta']);
+                $batch_ventas = [];
 
                 for ($i = 0; $i < $cantidad_venta; $i++) {
 
@@ -409,24 +379,33 @@ class Maqueta_compra extends BaseController
 
                     if (strlen($ruc_dni_otro) == 11) {
 
-                        $r = $this->existe_ruc_dni($ruc_dni_otro, 2);
-
-                        if ($r == 0) {
-                            $data_cliente = $this->api_dni_ruc("ruc", $ruc_dni_otro);
-
-                            if (isset($data_cliente['data'])) {
-                                $razon_social = $data_cliente['data']->razon_social;
-                                $condicion_con = $data_cliente['data']->condicion;
-                                $estado_con = $data_cliente['data']->estado;
-                            } else {
-                                $razon_social = "ERROR";
-                                $condicion_con = "ERROR";
-                                $estado_con = "ERROR";
-                            }
+                        if (isset($ruc_cache[$ruc_dni_otro])) {
+                            $razon_social = $ruc_cache[$ruc_dni_otro]['razon_social'];
+                            $condicion_con = $ruc_cache[$ruc_dni_otro]['condicion'];
+                            $estado_con = $ruc_cache[$ruc_dni_otro]['estado'];
                         } else {
-                            $razon_social = $r['razon_social'];
-                            $condicion_con = $r['condicion_contribuyente'];
-                            $estado_con = $r['estado_contribuyente'];
+                            $r = $this->existe_ruc_dni($ruc_dni_otro, 2);
+                            if ($r == 0) {
+                                $data_cliente = $this->api_dni_ruc("ruc", $ruc_dni_otro);
+                                if (isset($data_cliente['data'])) {
+                                    $razon_social = $data_cliente['data']->razon_social;
+                                    $condicion_con = $data_cliente['data']->condicion;
+                                    $estado_con = $data_cliente['data']->estado;
+                                } else {
+                                    $razon_social = "ERROR";
+                                    $condicion_con = "ERROR";
+                                    $estado_con = "ERROR";
+                                }
+                            } else {
+                                $razon_social = $r['razon_social'];
+                                $condicion_con = $r['condicion_contribuyente'];
+                                $estado_con = $r['estado_contribuyente'];
+                            }
+                            $ruc_cache[$ruc_dni_otro] = [
+                                'razon_social' => $razon_social,
+                                'condicion' => $condicion_con,
+                                'estado' => $estado_con,
+                            ];
                         }
                     } else {
 
@@ -436,28 +415,32 @@ class Maqueta_compra extends BaseController
                             $estado_con = "";
                         } else {
 
-                            $r = $this->existe_ruc_dni($ruc_dni_otro, 2);
-
-                            if ($r == 0) {
-
-                                if (strlen($ruc_dni_otro) == 8) {
-                                    $data_cliente = $this->api_dni_ruc("dni", $ruc_dni_otro);
-
-                                    if (isset($data_cliente['data'])) {
-                                        $razon_social = $data_cliente['data']->nombre;
-                                    } else {
-                                        $razon_social = $_POST['name_razon'][$i];
-                                    }
-                                } else {
-                                    $razon_social = $_POST['name_razon'][$i];
-                                }
-
+                            if (isset($ruc_cache[$ruc_dni_otro])) {
+                                $razon_social = $ruc_cache[$ruc_dni_otro]['razon_social'];
                                 $condicion_con = "";
                                 $estado_con = "";
                             } else {
-                                $razon_social = $r['razon_social'];
-                                $condicion_con = "";
-                                $estado_con = "";
+                                $r = $this->existe_ruc_dni($ruc_dni_otro, 2);
+                                if ($r == 0) {
+                                    if (strlen($ruc_dni_otro) == 8) {
+                                        $data_cliente = $this->api_dni_ruc("dni", $ruc_dni_otro);
+                                        if (isset($data_cliente['data'])) {
+                                            $razon_social = $data_cliente['data']->nombre;
+                                            $ruc_cache[$ruc_dni_otro] = ['razon_social' => $razon_social, 'condicion' => '', 'estado' => ''];
+                                        } else {
+                                            $razon_social = $_POST['name_razon'][$i];
+                                        }
+                                    } else {
+                                        $razon_social = $_POST['name_razon'][$i];
+                                    }
+                                    $condicion_con = "";
+                                    $estado_con = "";
+                                } else {
+                                    $razon_social = $r['razon_social'];
+                                    $condicion_con = "";
+                                    $estado_con = "";
+                                    $ruc_cache[$ruc_dni_otro] = ['razon_social' => $razon_social, 'condicion' => '', 'estado' => ''];
+                                }
                             }
                         }
                     }
@@ -491,194 +474,73 @@ class Maqueta_compra extends BaseController
                         "contribuyente" => $_POST['ruc_contribuyente']
                     );
 
-                    $maqueta_ventas->insert($insertar);
+                    $batch_ventas[] = $insertar;
                 }
 
-                $query_venta = $maqueta_ventas->where('fecha_registro', $fecha_registro)->where('documento', 'FACTURA')->orderBy('fecha', 'ASC')->orderBy('numero_documento', 'ASC')->findAll();
+                if (!empty($batch_ventas)) {
+                    $maqueta_ventas->insertBatch($batch_ventas);
+                }
 
-                //echo "<pre>"; print_r($query_venta);exit;
-
-                $query_venta_boletas = $maqueta_ventas->where('fecha_registro', $fecha_registro)->where('documento', 'BOLETA')->orderBy('fecha', 'ASC')->orderBy('numero_documento', 'ASC')->findAll();
-
-                $query_notas_credito = $maqueta_ventas->where('fecha_registro', $fecha_registro)->where('documento', 'NOTA DE CREDITO')->orderBy('fecha', 'ASC')->orderBy('numero_documento', 'ASC')->findAll();
-
-                $query_notas_debito = $maqueta_ventas->where('fecha_registro', $fecha_registro)->where('documento', 'NOTA DE DEBITO')->orderBy('fecha', 'ASC')->orderBy('numero_documento', 'ASC')->findAll();
+                $all_ventas = $maqueta_ventas->where('fecha_registro', $fecha_registro)->orderBy('fecha', 'ASC')->orderBy('numero_documento', 'ASC')->findAll();
+                $grouped_ventas = ['FACTURA' => [], 'BOLETA' => [], 'NOTA DE CREDITO' => [], 'NOTA DE DEBITO' => []];
+                foreach ($all_ventas as $v) {
+                    if (isset($grouped_ventas[$v['documento']])) {
+                        $grouped_ventas[$v['documento']][] = $v;
+                    }
+                }
+                $query_venta        = $grouped_ventas['FACTURA'];
+                $query_venta_boletas = $grouped_ventas['BOLETA'];
+                $query_notas_credito = $grouped_ventas['NOTA DE CREDITO'];
+                $query_notas_debito  = $grouped_ventas['NOTA DE DEBITO'];
 
                 $spreadsheet = new Spreadsheet();
                 $sheet = $spreadsheet->getActiveSheet();
-
                 $sheet->setTitle("Maqueta de ventas");
 
-                $styleTitle = [
-                    'font' => [
-                        'bold' => true,
-                        //'size' => 20
-                    ]
-                ];
-
-                $sheet->getStyle('A1')->applyFromArray($styleTitle);
-                $sheet->getStyle('B1')->applyFromArray($styleTitle);
-                $sheet->getStyle('C1')->applyFromArray($styleTitle);
-                $sheet->getStyle('D1')->applyFromArray($styleTitle);
-                $sheet->getStyle('E1')->applyFromArray($styleTitle);
-                $sheet->getStyle('F1')->applyFromArray($styleTitle);
-                $sheet->getStyle('G1')->applyFromArray($styleTitle);
-                $sheet->getStyle('H1')->applyFromArray($styleTitle);
-                $sheet->getStyle('I1')->applyFromArray($styleTitle);
-                $sheet->getStyle('J1')->applyFromArray($styleTitle);
-                $sheet->getStyle('K1')->applyFromArray($styleTitle);
-                $sheet->getStyle('L1')->applyFromArray($styleTitle);
-                $sheet->getStyle('M1')->applyFromArray($styleTitle);
-                $sheet->getStyle('N1')->applyFromArray($styleTitle);
-                $sheet->getStyle('O1')->applyFromArray($styleTitle);
-                $sheet->getStyle('P1')->applyFromArray($styleTitle);
-                $sheet->getStyle('Q1')->applyFromArray($styleTitle);
-                $sheet->getStyle('R1')->applyFromArray($styleTitle);
-                $sheet->getStyle('S1')->applyFromArray($styleTitle);
-                $sheet->getStyle('T1')->applyFromArray($styleTitle);
-                $sheet->getStyle('U1')->applyFromArray($styleTitle);
-                $sheet->getStyle('V1')->applyFromArray($styleTitle);
-                //$sheet->getStyle('T1')->applyFromArray($styleTitle);
+                $sheet->getStyle('A1:V1')->applyFromArray(['font' => ['bold' => true]]);
 
                 $encabezado = ["FECHA", "TIPO_MONEDA", "DOCUMENTO", "#_DOCUMENTO", "CONDICION", "RUC", "RAZON_SOCIAL", "VVENTA", "VALOR_DE_VENTA", "IGV", "BOLSA", "ICB", "TOTAL", "TIPO_CAMBIO", "GLOSA", "CUENTA", "AFECTACION", 'CONDICION DEL CONTRIBUYENTE', 'ESTADO DEL CONTRIBUYENTE', 'TIPO', 'REFERENCIA', 'FECHA REFERENCIA'];
-                # El último argumento es por defecto A1 pero lo pongo para que se explique mejor
                 $sheet->fromArray($encabezado, null, 'A1');
 
-                $contador = 0;
+                // Forzar columna D como texto para preservar formato de serie-correlativo
+                $sheet->getStyle('D:D')->getNumberFormat()->setFormatCode('@');
 
-                foreach ($query_venta as $key => $value) {
+                $filas_ventas = [];
 
-                    $sheet->setCellValueByColumnAndRow(1, $key + 2, date('d/m/Y', strtotime($value["fecha"])));
-                    $sheet->setCellValueByColumnAndRow(2, $key + 2, $value["tipo_moneda"]);
-                    $sheet->setCellValueByColumnAndRow(3, $key + 2, $value['documento']);
-                    //$sheet->setCellValueByColumnAndRow(4, $key + 2, $value['numero_documento']);
+                $grupos_venta = [$query_venta, $query_venta_boletas, $query_notas_credito, $query_notas_debito];
+                $tiene_referencia = [false, false, true, true];
 
-                    $sheet->getCellByColumnAndRow(4, $key + 2)->setValueExplicit($value['numero_documento'], DataType::TYPE_STRING);
-
-                    $sheet->setCellValueByColumnAndRow(5, $key + 2, $value['condicion']);
-                    $sheet->setCellValueByColumnAndRow(6, $key + 2, $value['ruc']);
-                    $sheet->setCellValueByColumnAndRow(7, $key + 2, $value['razon_social']);
-                    $sheet->setCellValueByColumnAndRow(8, $key + 2, $value['vventa']);
-                    $sheet->setCellValueByColumnAndRow(9, $key + 2, $value['valor_venta']);
-                    $sheet->setCellValueByColumnAndRow(10, $key + 2, $value['igv']);
-                    $sheet->setCellValueByColumnAndRow(11, $key + 2, $value['bolsa']);
-                    $sheet->setCellValueByColumnAndRow(12, $key + 2, $value['icb']);
-                    $sheet->setCellValueByColumnAndRow(13, $key + 2, $value['total']);
-                    $sheet->setCellValueByColumnAndRow(14, $key + 2, $value['tipo_cambio']);
-                    $sheet->setCellValueByColumnAndRow(15, $key + 2, $value['glosa']);
-                    $sheet->setCellValueByColumnAndRow(16, $key + 2, $value['cuenta']);
-                    $sheet->setCellValueByColumnAndRow(17, $key + 2, $value['afectacion']);
-                    //$sheet->setCellValueByColumnAndRow(18, $key + 2, $value['estado']);
-                    $sheet->setCellValueByColumnAndRow(18, $key + 2, $value['condicion_contribuyente']);
-                    $sheet->setCellValueByColumnAndRow(19, $key + 2, $value['estado_contribuyente']);
-                    $sheet->setCellValueByColumnAndRow(20, $key + 2, "");
-                    $sheet->setCellValueByColumnAndRow(21, $key + 2, "");
-                    $sheet->setCellValueByColumnAndRow(22, $key + 2, "");
-
-                    $contador++;
-                }
-
-                foreach ($query_venta_boletas as $keys => $values) {
-                    $sheet->setCellValueByColumnAndRow(1, $contador + 2, date('d/m/Y', strtotime($values["fecha"])));
-                    $sheet->setCellValueByColumnAndRow(2, $contador + 2, $values["tipo_moneda"]);
-                    $sheet->setCellValueByColumnAndRow(3, $contador + 2, $values['documento']);
-                    //$sheet->setCellValueByColumnAndRow(4, $contador + 2, $values['numero_documento']);
-
-                    $sheet->getCellByColumnAndRow(4, $contador + 2)->setValueExplicit($values['numero_documento'], DataType::TYPE_STRING);
-
-                    $sheet->setCellValueByColumnAndRow(5, $contador + 2, $values['condicion']);
-                    $sheet->setCellValueByColumnAndRow(6, $contador + 2, $values['ruc']);
-                    $sheet->setCellValueByColumnAndRow(7, $contador + 2, $values['razon_social']);
-                    $sheet->setCellValueByColumnAndRow(8, $contador + 2, $values['vventa']);
-                    $sheet->setCellValueByColumnAndRow(9, $contador + 2, $values['valor_venta']);
-                    $sheet->setCellValueByColumnAndRow(10, $contador + 2, $values['igv']);
-                    $sheet->setCellValueByColumnAndRow(11, $contador + 2, $values['bolsa']);
-                    $sheet->setCellValueByColumnAndRow(12, $contador + 2, $values['icb']);
-                    $sheet->setCellValueByColumnAndRow(13, $contador + 2, $values['total']);
-                    $sheet->setCellValueByColumnAndRow(14, $contador + 2, $values['tipo_cambio']);
-                    $sheet->setCellValueByColumnAndRow(15, $contador + 2, $values['glosa']);
-                    $sheet->setCellValueByColumnAndRow(16, $contador + 2, $values['cuenta']);
-                    $sheet->setCellValueByColumnAndRow(17, $contador + 2, $values['afectacion']);
-                    //$sheet->setCellValueByColumnAndRow(18, $key + 2, $value['estado']);
-                    $sheet->setCellValueByColumnAndRow(18, $contador + 2, $values['condicion_contribuyente']);
-                    $sheet->setCellValueByColumnAndRow(19, $contador + 2, $values['estado_contribuyente']);
-                    $sheet->setCellValueByColumnAndRow(20, $contador + 2, "");
-                    $sheet->setCellValueByColumnAndRow(21, $contador + 2, "");
-                    $sheet->setCellValueByColumnAndRow(22, $contador + 2, "");
-
-                    $contador++;
-                }
-
-                foreach ($query_notas_credito as $keyss => $valuess) {
-                    $sheet->setCellValueByColumnAndRow(1, $contador + 2, date('d/m/Y', strtotime($valuess["fecha"])));
-                    $sheet->setCellValueByColumnAndRow(2, $contador + 2, $valuess["tipo_moneda"]);
-                    $sheet->setCellValueByColumnAndRow(3, $contador + 2, $valuess['documento']);
-                    //$sheet->setCellValueByColumnAndRow(4, $contador + 2, $valuess['numero_documento']);
-
-                    $sheet->getCellByColumnAndRow(4, $contador + 2)->setValueExplicit($valuess['numero_documento'], DataType::TYPE_STRING);
-
-                    $sheet->setCellValueByColumnAndRow(5, $contador + 2, $valuess['condicion']);
-                    $sheet->setCellValueByColumnAndRow(6, $contador + 2, $valuess['ruc']);
-                    $sheet->setCellValueByColumnAndRow(7, $contador + 2, $valuess['razon_social']);
-                    $sheet->setCellValueByColumnAndRow(8, $contador + 2, $valuess['vventa']);
-                    $sheet->setCellValueByColumnAndRow(9, $contador + 2, $valuess['valor_venta']);
-                    $sheet->setCellValueByColumnAndRow(10, $contador + 2, $valuess['igv']);
-                    $sheet->setCellValueByColumnAndRow(11, $contador + 2, $valuess['bolsa']);
-                    $sheet->setCellValueByColumnAndRow(12, $contador + 2, $valuess['icb']);
-                    $sheet->setCellValueByColumnAndRow(13, $contador + 2, $valuess['total']);
-                    $sheet->setCellValueByColumnAndRow(14, $contador + 2, $valuess['tipo_cambio']);
-                    $sheet->setCellValueByColumnAndRow(15, $contador + 2, $valuess['glosa']);
-                    $sheet->setCellValueByColumnAndRow(16, $contador + 2, $valuess['cuenta']);
-                    $sheet->setCellValueByColumnAndRow(17, $contador + 2, $valuess['afectacion']);
-                    //$sheet->setCellValueByColumnAndRow(18, $key + 2, $value['estado']);
-                    $sheet->setCellValueByColumnAndRow(18, $contador + 2, $valuess['condicion_contribuyente']);
-                    $sheet->setCellValueByColumnAndRow(19, $contador + 2, $valuess['estado_contribuyente']);
-                    $sheet->setCellValueByColumnAndRow(20, $contador + 2, $valuess['tipo']);
-                    $sheet->setCellValueByColumnAndRow(21, $contador + 2, $valuess['referencia']);
-
-                    if ($valuess['fecha_referencia'] == '0000:00:00') {
-                        $sheet->setCellValueByColumnAndRow(22, $contador + 2, "");
-                    } else {
-                        $sheet->setCellValueByColumnAndRow(22, $contador + 2, $valuess['fecha_referencia']);
+                foreach ($grupos_venta as $gi => $grupo) {
+                    foreach ($grupo as $v) {
+                        $filas_ventas[] = [
+                            date('d/m/Y', strtotime($v["fecha"])),
+                            $v["tipo_moneda"],
+                            $v['documento'],
+                            $v['numero_documento'],
+                            $v['condicion'],
+                            $v['ruc'],
+                            $v['razon_social'],
+                            $v['vventa'],
+                            $v['valor_venta'],
+                            $v['igv'],
+                            $v['bolsa'],
+                            $v['icb'],
+                            $v['total'],
+                            $v['tipo_cambio'],
+                            $v['glosa'],
+                            $v['cuenta'],
+                            $v['afectacion'],
+                            $v['condicion_contribuyente'],
+                            $v['estado_contribuyente'],
+                            $tiene_referencia[$gi] ? $v['tipo'] : "",
+                            $tiene_referencia[$gi] ? $v['referencia'] : "",
+                            ($tiene_referencia[$gi] && $v['fecha_referencia'] !== '0000:00:00') ? $v['fecha_referencia'] : "",
+                        ];
                     }
-
-                    $contador++;
                 }
 
-                foreach ($query_notas_debito as $deb => $valDeb) {
-                    $sheet->setCellValueByColumnAndRow(1, $contador + 2, date('d/m/Y', strtotime($valDeb["fecha"])));
-                    $sheet->setCellValueByColumnAndRow(2, $contador + 2, $valDeb["tipo_moneda"]);
-                    $sheet->setCellValueByColumnAndRow(3, $contador + 2, $valDeb['documento']);
-                    //$sheet->setCellValueByColumnAndRow(4, $contador + 2, $valDeb['numero_documento']);
-
-                    $sheet->getCellByColumnAndRow(4, $contador + 2)->setValueExplicit($valDeb['numero_documento'], DataType::TYPE_STRING);
-
-                    $sheet->setCellValueByColumnAndRow(5, $contador + 2, $valDeb['condicion']);
-                    $sheet->setCellValueByColumnAndRow(6, $contador + 2, $valDeb['ruc']);
-                    $sheet->setCellValueByColumnAndRow(7, $contador + 2, $valDeb['razon_social']);
-                    $sheet->setCellValueByColumnAndRow(8, $contador + 2, $valDeb['vventa']);
-                    $sheet->setCellValueByColumnAndRow(9, $contador + 2, $valDeb['valor_venta']);
-                    $sheet->setCellValueByColumnAndRow(10, $contador + 2, $valDeb['igv']);
-                    $sheet->setCellValueByColumnAndRow(11, $contador + 2, $valDeb['bolsa']);
-                    $sheet->setCellValueByColumnAndRow(12, $contador + 2, $valDeb['icb']);
-                    $sheet->setCellValueByColumnAndRow(13, $contador + 2, $valDeb['total']);
-                    $sheet->setCellValueByColumnAndRow(14, $contador + 2, $valDeb['tipo_cambio']);
-                    $sheet->setCellValueByColumnAndRow(15, $contador + 2, $valDeb['glosa']);
-                    $sheet->setCellValueByColumnAndRow(16, $contador + 2, $valDeb['cuenta']);
-                    $sheet->setCellValueByColumnAndRow(17, $contador + 2, $valDeb['afectacion']);
-                    //$sheet->setCellValueByColumnAndRow(18, $key + 2, $value['estado']);
-                    $sheet->setCellValueByColumnAndRow(18, $contador + 2, $valDeb['condicion_contribuyente']);
-                    $sheet->setCellValueByColumnAndRow(19, $contador + 2, $valDeb['estado_contribuyente']);
-                    $sheet->setCellValueByColumnAndRow(20, $contador + 2, $valDeb['tipo']);
-                    $sheet->setCellValueByColumnAndRow(21, $contador + 2, $valDeb['referencia']);
-
-                    if ($valDeb['fecha_referencia'] == '0000:00:00') {
-                        $sheet->setCellValueByColumnAndRow(22, $contador + 2, "");
-                    } else {
-                        $sheet->setCellValueByColumnAndRow(22, $contador + 2, $valDeb['fecha_referencia']);
-                    }
-
-                    $contador++;
+                if (!empty($filas_ventas)) {
+                    $sheet->fromArray($filas_ventas, null, 'A2');
                 }
 
                 $file_ventas = "MAQUETA_VENTA_" . $ruc . "_" . uniqid() . '.xlsx';

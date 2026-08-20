@@ -78,8 +78,8 @@ class BaseController extends Controller
 			CURLOPT_RETURNTRANSFER => 1,
 			CURLOPT_URL => $ruta,
 			CURLOPT_USERAGENT => 'Consulta Datos',
-			CURLOPT_CONNECTTIMEOUT => 0,
-			CURLOPT_TIMEOUT => 400,
+			CURLOPT_CONNECTTIMEOUT => 5,
+			CURLOPT_TIMEOUT => 10,
 			CURLOPT_FAILONERROR => true
 		));
 
