@@ -197,13 +197,13 @@ class Maqueta_compra extends BaseController
                             $color = 'FF0000';
                             if (in_array($color, $array_colores) == true) {
                                 $color_ = 999;
+                                $intento = 0;
                                 while ($color_ <= 999) {
                                     $conteo = count($colores);
                                     $color_aleatorio = mt_rand(0, $conteo - 1);
                                     $color_aleatorio = $colores[$color_aleatorio];
-                                    if (in_array($color_aleatorio, $array_colores) == true) {
-                                        $color_ = 999;
-                                    } else {
+                                    $intento++;
+                                    if (!in_array($color_aleatorio, $array_colores) || $intento >= 50) {
                                         $color_ = 1000;
                                     }
                                     $color = $color_aleatorio;
