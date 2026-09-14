@@ -2033,9 +2033,7 @@ class Maqueta_compra extends BaseController
                 $rows[] = $cells;
             }
 
-            echo "<pre>";
-            print_r($rows);
-            exit;
+            //echo "<pre>"; print_r($rows);exit;
 
             // Visualizar el array (para este ejemplo)
 
