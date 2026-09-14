@@ -2045,8 +2045,13 @@ class Maqueta_compra extends BaseController
                 $fila = $rows[$i];
 
                 if ($fila[1] != "") {
-                    $fecha_emision = Date::excelToDateTimeObject($fila[1]);
-                    $fecha_emision = $fecha_emision->format('Y-m-d');
+                    if (is_numeric($fila[1])) {
+                        $fecha_emision = Date::excelToDateTimeObject($fila[1]);
+                        $fecha_emision = $fecha_emision->format('Y-m-d');
+                    } else {
+                        $dt = \DateTime::createFromFormat('d/m/Y', $fila[1]);
+                        $fecha_emision = $dt->format('Y-m-d');
+                    }
 
                     $serie_numero = $fila[4] . "-" . $fila[6];
                     $ruc = $fila[9];
