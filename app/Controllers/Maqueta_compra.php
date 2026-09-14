@@ -351,10 +351,10 @@ class Maqueta_compra extends BaseController
                 // Aplicar color a fila completa (en vez de celda por celda)
                 foreach ($colored_rows_compras as $row_num => $color_val) {
                     $sheet->getStyle("A{$row_num}:T{$row_num}")
-                          ->getFill()
-                          ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                          ->getStartColor()
-                          ->setARGB($color_val);
+                        ->getFill()
+                        ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                        ->getStartColor()
+                        ->setARGB($color_val);
                 }
 
                 $file_compras = "MAQUETA_COMPRAS_" . $ruc . "_" . uniqid() . ".xlsx";
@@ -2033,7 +2033,9 @@ class Maqueta_compra extends BaseController
                 $rows[] = $cells;
             }
 
-            //echo "<pre>"; print_r($rows);exit;
+            echo "<pre>";
+            print_r($rows);
+            exit;
 
             // Visualizar el array (para este ejemplo)
 
