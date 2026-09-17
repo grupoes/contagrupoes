@@ -104,7 +104,7 @@ class Maqueta_compra extends BaseController
     {
         $maqueta = model('MaquetaComprasModel');
 
-        $data = $maqueta->query("SELECT * FROM maqueta_compras WHERE fecha_registro = '$fecha_registro' AND total >= 1500 AND documento = 'HONORARIOS'")->getResult();
+        $data = $maqueta->query("SELECT * FROM maqueta_compras WHERE fecha_registro = '$fecha_registro' AND total >= 1500 AND documento = 'HONORARIOS'")->getResultArray();
 
         return view('maqueta/honorarios', ['data' => $data]);
     }
