@@ -55,7 +55,7 @@
         <tbody>
             <?php foreach ($data as $u): ?>
                 <tr>
-                    <td><?= $u['id'] ?></td>
+                    <td><?= $u['id_maqueta'] ?></td>
                     <td><?= $u['razon_social'] ?></td>
                     <td><?= $u['total'] ?></td>
                 </tr>
