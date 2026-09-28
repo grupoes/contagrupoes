@@ -48,16 +48,22 @@
         <thead>
             <tr>
                 <th>#</th>
+                <th>Fecha Emisión</th>
+                <th>Serie - Número</th>
+                <th>RUC</th>
                 <th>Nombre</th>
                 <th>Monto</th>
             </tr>
         </thead>
         <tbody>
-            <?php foreach ($data as $u): ?>
+            <?php $i = 1; foreach ($data as $u): ?>
                 <tr>
-                    <td><?= $u['id_maqueta'] ?></td>
+                    <td><?= $i++ ?></td>
+                    <td><?= $u['fecha'] ?></td>
+                    <td><?= $u['numero_documento'] ?></td>
+                    <td><?= $u['ruc'] ?></td>
                     <td><?= $u['razon_social'] ?></td>
-                    <td><?= $u['total'] ?></td>
+                    <td>S/ <?= number_format($u['total'], 2) ?></td>
                 </tr>
             <?php endforeach; ?>
         </tbody>

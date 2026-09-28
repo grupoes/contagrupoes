@@ -224,6 +224,7 @@
                                             <button type="button" class="btn btn-warning" id="modal_maqueta_venta">PDF VENTA</button>
                                             <button type="button" class="btn btn-secondary" id="modal_rh">TXT RH</button>
                                             <button type="button" class="btn btn-success" id="modalSire">SIRE</button>
+                                            <a href="/honorarios-historial/<?= $numero ?>" target="_blank" class="btn btn-dark" title="Recibos por Honorarios >= 1500">Honorarios >= 1500</a>
                                             <button type="button" class="btn btn-danger" id="cancelar" title="Cancelar"><i class="mdi mdi-close"></i></button>
                                         </div>
                                     </div>

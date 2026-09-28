@@ -106,7 +106,21 @@ class Maqueta_compra extends BaseController
 
         $data = $maqueta->query("SELECT * FROM maqueta_compras WHERE fecha_registro = '$fecha_registro' AND total >= 1500 AND documento = 'HONORARIOS'")->getResultArray();
 
-        return view('maqueta/honorarios', ['data' => $data]);
+        $cliente = !empty($data) ? $data[0]['cliente'] : '';
+        return view('maqueta/honorarios', ['data' => $data, 'cliente' => $cliente]);
+    }
+
+    public function honorarios_historial($ruc)
+    {
+        $maqueta = model('MaquetaComprasModel');
+        $data['honorarios'] = $maqueta
+            ->where('cliente', $ruc)
+            ->where('documento', 'HONORARIOS')
+            ->where('total >=', 1500)
+            ->orderBy('fecha', 'DESC')
+            ->findAll();
+        $data['ruc'] = $ruc;
+        return view('maqueta/honorarios_historial', $data);
     }
 
     public function generar_maqueta()

@@ -70,6 +70,7 @@ $routes->get('descargar-maqueta-xlsx/(:any)', 'Maqueta_compra::descargarExcelMaq
 $routes->get('descargar-maqueta-periodo/(:any)', 'Maqueta_compra::downloadMaquetaPeriodo/$1');
 $routes->get('descargar-maqueta-registros/(:any)', 'Maqueta_compra::downloadMaquetaRegistro/$1');
 $routes->get('descargar-honorarios/(:any)', 'Maqueta_compra::descargarHonorarios/$1');
+$routes->get('honorarios-historial/(:num)', 'Maqueta_compra::honorarios_historial/$1');
 
 $routes->post('downloadMaqueta', 'Maqueta_compra::download_maqueta');
 $routes->post('downloadAbancarizados', 'Maqueta_compra::comprobantes_abancarizados');
