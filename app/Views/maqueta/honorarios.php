@@ -42,7 +42,7 @@
         <button onclick="window.print()">Descargar / Imprimir PDF</button>
     </div>
 
-    <h2>Reporte de Honorarios</h2>
+    <h2>Reporte de Honorarios - <?= $razon_social ?></h2>
 
     <table>
         <thead>
