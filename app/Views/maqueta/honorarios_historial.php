@@ -57,7 +57,13 @@
     </div>
 
     <h2>Recibos por Honorarios &gt;= S/ 1,500</h2>
-    <p class="subtitulo">Cliente RUC: <?= $ruc ?> &nbsp;&mdash;&nbsp; Total registros: <?= count($honorarios) ?></p>
+    <p class="subtitulo">
+        Cliente RUC: <?= $ruc ?>
+        <?php if ($periodo): ?>
+            &nbsp;&mdash;&nbsp; Período: <?= $periodo ?>
+        <?php endif; ?>
+        &nbsp;&mdash;&nbsp; Total registros: <?= count($honorarios) ?>
+    </p>
 
     <?php if (empty($honorarios)): ?>
         <p>No se encontraron registros.</p>

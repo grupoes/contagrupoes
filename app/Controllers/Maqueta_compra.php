@@ -110,16 +110,21 @@ class Maqueta_compra extends BaseController
         return view('maqueta/honorarios', ['data' => $data, 'cliente' => $cliente]);
     }
 
-    public function honorarios_historial($ruc)
+    public function honorarios_historial($ruc, $periodo = null)
     {
         $maqueta = model('MaquetaComprasModel');
-        $data['honorarios'] = $maqueta
+        $query = $maqueta
             ->where('cliente', $ruc)
             ->where('documento', 'HONORARIOS')
-            ->where('total >=', 1500)
-            ->orderBy('fecha', 'DESC')
-            ->findAll();
+            ->where('total >=', 1500);
+
+        if ($periodo) {
+            $query->where('periodo', $periodo . '-01');
+        }
+
+        $data['honorarios'] = $query->orderBy('fecha', 'DESC')->findAll();
         $data['ruc'] = $ruc;
+        $data['periodo'] = $periodo;
         return view('maqueta/honorarios_historial', $data);
     }
 

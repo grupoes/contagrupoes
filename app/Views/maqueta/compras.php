@@ -181,6 +181,7 @@
                                                 <a class="dropdown-item" href="#" id="downloadMaqueta">Maqueta de Compras</a>
                                                 <a class="dropdown-item" href="#" id="maquetaRegistro">Maqueta de Compras por Registro</a>
                                                 <a class="dropdown-item" href="#" id="consultaBancarizados">Consulta de comprobantes bancarizados</a>
+                                                <a class="dropdown-item" href="#" id="linkHonorariosHistorial">Honorarios &gt;= 1500</a>
                                             </div>
                                         </div>
                                     </div>
@@ -224,7 +225,6 @@
                                             <button type="button" class="btn btn-warning" id="modal_maqueta_venta">PDF VENTA</button>
                                             <button type="button" class="btn btn-secondary" id="modal_rh">TXT RH</button>
                                             <button type="button" class="btn btn-success" id="modalSire">SIRE</button>
-                                            <a href="/honorarios-historial/<?= $numero ?>" target="_blank" class="btn btn-dark" title="Recibos por Honorarios >= 1500">Honorarios >= 1500</a>
                                             <button type="button" class="btn btn-danger" id="cancelar" title="Cancelar"><i class="mdi mdi-close"></i></button>
                                         </div>
                                     </div>
@@ -675,6 +675,14 @@
 
     <!-- dashboard init -->
     <script src="<?= base_url() ?>/js/maqueta_compras.js?t=<?php echo time(); ?>"></script>
+
+    <script>
+        document.getElementById('linkHonorariosHistorial').addEventListener('click', function(e) {
+            e.preventDefault();
+            const periodo = document.getElementById('periodo').value;
+            window.open('/honorarios-historial/<?= $numero ?>/' + (periodo || ''), '_blank');
+        });
+    </script>
 
 </body>
 
